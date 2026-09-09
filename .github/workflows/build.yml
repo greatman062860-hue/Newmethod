@@ -25,34 +25,53 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install build dependencies
+      - name: Update package manager
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get update -qq
+          sudo apt-get upgrade -y -qq
+
+      - name: Install build dependencies - Part 1
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential \
             git \
             zlib1g-dev \
             libffi-dev \
-            libssl-dev \
+            libssl-dev
+
+      - name: Install build dependencies - Part 2
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             libtool \
             m4 \
             autoconf \
             automake \
             pkg-config \
             libltdl-dev \
+            libltdl7 \
             cython3
-          echo "✓ Build dependencies installed"
 
-      - name: Verify build tools
+      - name: Wait for package manager lock
         run: |
-          echo "Python version:"
+          while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+            echo "Waiting for apt lock..."
+            sleep 2
+          done
+          echo "Package manager ready"
+
+      - name: Verify build tools are installed
+        run: |
+          echo "=== Checking installed tools ==="
+          which libtool || (echo "libtool not found in PATH" && exit 1)
+          libtool --version || (echo "libtool failed to run" && exit 1)
+          which autoconf || (echo "autoconf not found" && exit 1)
+          which automake || (echo "automake not found" && exit 1)
+          echo ""
+          echo "=== Python and Java versions ==="
           python3 --version
-          echo "Pip version:"
           pip --version
-          echo "Libtool version:"
-          libtool --version
-          echo "Java version:"
           java -version
+          echo "✓ All tools verified"
 
       - name: Install Python packages
         run: |
@@ -60,19 +79,13 @@ jobs:
           pip install buildozer cython Pillow requests urllib3
           echo "✓ Python packages installed"
 
-      - name: Setup Android SDK tools
+      - name: Verify buildozer installation
         run: |
-          mkdir -p ~/android-sdk
-          export ANDROID_HOME=~/android-sdk
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          which buildozer || (echo "buildozer not installed" && exit 1)
+          buildozer --version || echo "buildozer version check completed"
 
       - name: Create buildozer configuration
         run: |
-          # Initialize buildozer with defaults first
-          buildozer init --private
-          
-          # Now create the config file
           cat > buildozer.spec << 'BUILDOZER_SPEC'
           [app]
           
@@ -91,7 +104,7 @@ jobs:
           # (list) Source include patterns (let empty to include all the files)
           source.include_exts = py,png,jpg,kv,atlas
           
-          # (list) List of inclusions using pattern matching
+          # (list) Source include patterns
           source.include_patterns = assets/*,images/*.png
           
           # (list) Source exclude patterns
@@ -130,10 +143,10 @@ jobs:
           # (str) Android logcat filters to use (default is *)
           android.logcat_filters = *:S python:D
           
-          # (bool) Copy library instead of making a libpymodules.so
+          # (bool) Accept SDK license
           android.accept_sdk_license = True
           
-          # (list) android.permissions (see _build_permissions function in buildozer.spec for all the supported ones)
+          # (list) android.permissions
           android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
           
           # (list) Android features
@@ -155,28 +168,23 @@ jobs:
           
           BUILDOZER_SPEC
           
-          echo "✓ buildozer.spec created"
-          cat buildozer.spec
+          echo "✓ buildozer.spec created successfully"
 
       - name: Build Android APK
         run: |
           echo "Starting APK build..."
+          set -e
           buildozer android debug 2>&1 | tee build_output.log
-          BUILD_STATUS=$?
-          echo "Build completed with status: $BUILD_STATUS"
-          if [ $BUILD_STATUS -ne 0 ]; then
-            echo "Build failed!"
-            tail -100 build_output.log
-            exit $BUILD_STATUS
-          fi
+          echo "✓ APK build completed"
 
       - name: List build artifacts
         if: always()
         run: |
-          echo "Contents of bin directory:"
-          ls -lah bin/ || echo "bin directory not found"
-          echo "Looking for APK files:"
-          find . -name "*.apk" -type f || echo "No APK files found"
+          echo "=== Contents of bin directory ==="
+          ls -lah bin/ 2>/dev/null || echo "bin directory not found"
+          echo ""
+          echo "=== Looking for APK files ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found yet"
 
       - name: Upload APK
         if: success()
@@ -192,16 +200,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: |
-            build_output.log
-            buildozer.spec
+          path: build_output.log
           retention-days: 7
           if-no-files-found: ignore
-
-      - name: Print summary
-        if: always()
-        run: |
-          echo "=== Build Summary ==="
-          echo "Job status: ${{ job.status }}"
-          echo "Build artifacts available in 'systemupdate-apk' artifact"
-          echo "Build logs available in 'build-logs' artifact"
