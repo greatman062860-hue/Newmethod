@@ -27,17 +27,23 @@ jobs:
 
       - name: Update and install build dependencies
         run: |
+          set -e
+          echo "Step 1: Updating package manager..."
           sudo apt-get update -qq
           sudo apt-get upgrade -y -qq
           
-          # Wait for any existing apt locks
+          echo "Step 2: Waiting for apt locks..."
           while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
-            echo "Waiting for apt lock..."
+            echo "  - Apt lock in use, waiting..."
             sleep 2
           done
           
-          # Install all dependencies in one go with error checking
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          echo "Step 3: Cleaning apt cache..."
+          sudo apt-get clean
+          sudo apt-get autoclean
+          
+          echo "Step 4: Installing build dependencies..."
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --fix-missing \
             build-essential \
             git \
             zlib1g-dev \
@@ -52,12 +58,36 @@ jobs:
             libltdl7 \
             cython3
           
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Failed to install build dependencies"
-            exit 1
+          INSTALL_RESULT=$?
+          
+          if [ $INSTALL_RESULT -ne 0 ]; then
+            echo "ERROR: First install attempt failed with exit code $INSTALL_RESULT"
+            echo "Attempting retry..."
+            sudo apt-get install -y --no-install-recommends --fix-missing \
+              build-essential \
+              git \
+              zlib1g-dev \
+              libffi-dev \
+              libssl-dev \
+              libtool \
+              m4 \
+              autoconf \
+              automake \
+              pkg-config \
+              libltdl-dev \
+              libltdl7 \
+              cython3
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Retry also failed"
+              exit 1
+            fi
           fi
           
-          echo "Package manager ready"
+          echo "Step 5: Verifying key packages..."
+          dpkg -l | grep -E "libtool|autoconf|automake" || (echo "ERROR: Verification failed" && exit 1)
+          
+          echo "✓ All dependencies installed successfully"
 
       - name: Verify build tools are installed
         run: |
