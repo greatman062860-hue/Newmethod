@@ -49,7 +49,7 @@ jobs:
           echo 'android.accept_sdk_license = True' >> buildozer.spec
           sed -i 's/android.api = .*/android.api = 33/g' buildozer.spec
           sed -i 's/android.minapi = .*/android.minapi = 24/g' buildozer.spec
-          sed -i 's/android.ndk = .*/android.ndk = 28c/g' buildozer.spec
+          sed -i 's/android.ndk = .*/android.ndk = 27.3.13750724/g' buildozer.spec
 
       - name: Build APK
         run: yes | buildozer android debug deploy run --verbose
