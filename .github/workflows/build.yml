@@ -153,7 +153,7 @@ jobs:
           android.minapi = 21
           
           # (str) Android NDK version to use
-          android.ndk = 27.3.13750724
+          android.ndk = 25.3.20230213
           
           # (bool) Use --private data storage (True) or --shared data storage (False)
           android.private_storage = True
@@ -206,13 +206,29 @@ jobs:
       - name: Build Android APK
         run: |
           echo "Starting APK build process..."
-          set -e
           buildozer android debug 2>&1 | tee build_output.log
           echo "✓ APK build completed successfully"
 
-      - name: Check build artifacts
+      - name: Check build artifacts & diagnose
         if: always()
         run: |
+          echo "========================================"
+          echo "BUILD DIAGNOSTICS"
+          echo "========================================"
+          
+          echo ""
+          echo "=== Current working directory ==="
+          pwd
+          
+          echo ""
+          echo "=== Full directory structure (top level) ==="
+          ls -lah
+          
+          echo ""
+          echo "=== Searching for all .apk files recursively ==="
+          find . -name "*.apk" -type f 2>/dev/null && echo "✓ APK found!" || echo "❌ No APK files found"
+          
+          echo ""
           echo "=== Checking bin directory ==="
           if [ -d "bin" ]; then
             ls -lah bin/
@@ -221,8 +237,8 @@ jobs:
           fi
           
           echo ""
-          echo "=== Searching for APK files ==="
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+          echo "=== Last 100 lines of build log ==="
+          tail -100 build_output.log
 
       - name: Upload APK artifacts
         if: always()
