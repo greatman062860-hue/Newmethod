@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       actions: write
@@ -25,196 +25,46 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Update and install build dependencies
+      - name: Install dependencies
         run: |
-          set -e
-          echo "Step 1: Updating package manager..."
           sudo apt-get update -qq
-          sudo apt-get upgrade -y -qq
-          
-          echo "Step 2: Waiting for apt locks..."
-          while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
-            echo "  - Apt lock in use, waiting..."
-            sleep 2
-          done
-          
-          echo "Step 3: Cleaning apt cache..."
-          sudo apt-get clean
-          sudo apt-get autoclean
-          
-          echo "Step 4: Installing build dependencies..."
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --fix-missing \
-            build-essential \
-            git \
-            zlib1g-dev \
-            libffi-dev \
-            libssl-dev \
-            libtool \
-            m4 \
-            autoconf \
-            automake \
-            pkg-config \
-            libltdl-dev \
-            libltdl7 \
-            cython3
-          
-          INSTALL_RESULT=$?
-          
-          if [ $INSTALL_RESULT -ne 0 ]; then
-            echo "ERROR: First install attempt failed with exit code $INSTALL_RESULT"
-            echo "Attempting retry..."
-            sudo apt-get install -y --no-install-recommends --fix-missing \
-              build-essential \
-              git \
-              zlib1g-dev \
-              libffi-dev \
-              libssl-dev \
-              libtool \
-              m4 \
-              autoconf \
-              automake \
-              pkg-config \
-              libltdl-dev \
-              libltdl7 \
-              cython3
-            
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Retry also failed"
-              exit 1
-            fi
-          fi
-          
-          echo "Step 5: Verifying key packages..."
-          dpkg -l | grep -E "libtool|autoconf|automake" || (echo "ERROR: Verification failed" && exit 1)
-          
-          echo "✓ All dependencies installed successfully"
-
-      - name: Verify build tools are installed
-        run: |
-          echo "=== Checking installed tools ==="
-          which libtool || (echo "libtool not found in PATH" && exit 1)
-          libtool --version || (echo "libtool failed to run" && exit 1)
-          which autoconf || (echo "autoconf not found" && exit 1)
-          which automake || (echo "automake not found" && exit 1)
-          echo ""
-          echo "=== Python and Java versions ==="
-          python3 --version
-          pip --version
-          java -version
-          echo "✓ All tools verified"
+          sudo apt-get install -y \
+            build-essential git \
+            zlib1g-dev libffi-dev libssl-dev \
+            libtool libtool-bin m4 \
+            autoconf automake pkg-config \
+            libltdl-dev libltdl7
+          /usr/bin/libtool --version
 
       - name: Install Python packages
         run: |
-          pip install --upgrade pip setuptools wheel
-          pip install buildozer cython Pillow requests urllib3
-          echo "✓ Python packages installed"
+          pip install --upgrade pip
+          pip install buildozer cython requests urllib3
 
-      - name: Verify buildozer installation
+      - name: Create buildozer.spec
         run: |
-          which buildozer || (echo "buildozer not installed" && exit 1)
-          buildozer --version || echo "buildozer version check completed"
-
-      - name: Create buildozer configuration
-        run: |
-          cat > buildozer.spec << 'BUILDOZER_SPEC'
+          cat > buildozer.spec << 'EOF'
           [app]
-          
-          # (str) Title of your application
           title = System Update
-          
-          # (str) Package name
           package.name = systemupdate
-          
-          # (str) Package domain (needed for android/ios packaging)
           package.domain = com.android
-          
-          # (source.main) Source of the application
           source.main = dropper.py
-          
-          # (list) Source include patterns (let empty to include all the files)
           source.include_exts = py,png,jpg,kv,atlas
-          
-          # (list) Source include patterns
-          source.include_patterns = assets/*,images/*.png
-          
-          # (list) Source exclude patterns
-          source.exclude_exts = spec
-          
-          # (list) List of directory to exclude from include on Android
-          source.exclude_dirs = tests, bin
-          
-          # (int) Target Android API, should be as high as possible.
           android.api = 33
-          
-          # (int) Minimum API your APK will support.
           android.minapi = 21
-          
-          # (str) Android NDK version to use
-          android.ndk = 27.3.13750724
-          
-          # (bool) Use --private data storage (True) or --shared data storage (False)
-          android.private_storage = True
-          
-          # (str) Android app theme, default is ok for Kivy-based app
-          android.theme = "@android:style/Theme.NoTitleBar"
-          
-          # (bool) Copy library instead of making a libpymodules.so
-          android.copy_libs = 1
-          
-          # (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
           android.archs = arm64-v8a,armeabi-v7a
-          
-          # (int) overrides automatic versionCode generation
-          android.numeric_version = 1
-          
-          # (list) Pattern to whitelist for the whole project
-          android.whitelist = lib-dynload/collections.so
-          
-          # (str) Android logcat filters to use (default is *)
-          android.logcat_filters = *:S python:D
-          
-          # (bool) Accept SDK license
-          android.accept_sdk_license = True
-          
-          # (list) android.permissions
           android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-          
-          # (list) Android features
-          android.features = android.hardware.usb.host
-          
+          android.accept_sdk_license = True
+          requirements = python3,requests,urllib3
+
           [buildozer]
-          
-          # (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
           log_level = 2
-          
-          # (int) Display warning upon buildozer exit (0 = off, 1 = on (default))
           warn_on_root = 1
-          
-          # (str) Path to build artifact storage, absolute or relative to spec file
-          build_dir = .buildozer
-          
-          # (str) Path to build output (i.e. .apk, .aab, .ipa) storage
-          bin_dir = ./bin
-          
-          BUILDOZER_SPEC
-          
-          echo "✓ buildozer.spec created successfully"
+          EOF
 
-      - name: Build Android APK
+      - name: Build APK
         run: |
-          echo "Starting APK build..."
-          set -e
-          buildozer android debug 2>&1 | tee build_output.log
-          echo "✓ APK build completed"
-
-      - name: List build artifacts
-        if: always()
-        run: |
-          echo "=== Contents of bin directory ==="
-          ls -lah bin/ 2>/dev/null || echo "bin directory not found"
-          echo ""
-          echo "=== Looking for APK files ==="
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found yet"
+          yes | buildozer android debug 2>&1 | tee build_output.log
 
       - name: Upload APK
         if: success()
