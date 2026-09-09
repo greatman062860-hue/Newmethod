@@ -6,6 +6,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
 
     steps:
       - name: Checkout code
@@ -17,68 +20,172 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install system dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git zlib1g-dev libffi-dev libssl-dev \
-            build-essential libtool m4 autoconf automake \
-            pkg-config libltdl-dev libltdl7 cython3
-          
-          # Verify installations
-          which libtool
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            git \
+            zlib1g-dev \
+            libffi-dev \
+            libssl-dev \
+            libtool \
+            m4 \
+            autoconf \
+            automake \
+            pkg-config \
+            libltdl-dev \
+            cython3
+          echo "✓ Build dependencies installed"
+
+      - name: Verify build tools
+        run: |
+          echo "Python version:"
+          python3 --version
+          echo "Pip version:"
+          pip --version
+          echo "Libtool version:"
           libtool --version
+          echo "Java version:"
+          java -version
 
-      - name: Upgrade pip and install Python dependencies
+      - name: Install Python packages
         run: |
-          python -m pip install --upgrade pip setuptools wheel
+          pip install --upgrade pip setuptools wheel
           pip install buildozer cython Pillow requests urllib3
+          echo "✓ Python packages installed"
 
-      - name: Create buildozer.spec
+      - name: Setup Android SDK tools
         run: |
-          cat > buildozer.spec << 'EOF'
+          mkdir -p ~/android-sdk
+          export ANDROID_HOME=~/android-sdk
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+
+      - name: Create buildozer configuration
+        run: |
+          # Initialize buildozer with defaults first
+          buildozer init --private
+          
+          # Now create the config file
+          cat > buildozer.spec << 'BUILDOZER_SPEC'
           [app]
+          
+          # (str) Title of your application
           title = System Update
+          
+          # (str) Package name
           package.name = systemupdate
+          
+          # (str) Package domain (needed for android/ios packaging)
           package.domain = com.android
+          
+          # (source.main) Source of the application
           source.main = dropper.py
-          version = 0.1
-          requirements = python3,requests,urllib3,android
-          permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-          features = android.hardware.usb.host
+          
+          # (list) Source include patterns (let empty to include all the files)
+          source.include_exts = py,png,jpg,kv,atlas
+          
+          # (list) List of inclusions using pattern matching
+          source.include_patterns = assets/*,images/*.png
+          
+          # (list) Source exclude patterns
+          source.exclude_exts = spec
+          
+          # (list) List of directory to exclude from include on Android
+          source.exclude_dirs = tests, bin
+          
+          # (int) Target Android API, should be as high as possible.
+          android.api = 33
+          
+          # (int) Minimum API your APK will support.
+          android.minapi = 21
+          
+          # (str) Android NDK version to use
+          android.ndk = 27.3.13750724
+          
+          # (bool) Use --private data storage (True) or --shared data storage (False)
+          android.private_storage = True
+          
+          # (str) Android app theme, default is ok for Kivy-based app
+          android.theme = "@android:style/Theme.NoTitleBar"
+          
+          # (bool) Copy library instead of making a libpymodules.so
+          android.copy_libs = 1
+          
+          # (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
+          android.archs = arm64-v8a,armeabi-v7a
+          
+          # (int) overrides automatic versionCode generation
+          android.numeric_version = 1
+          
+          # (list) Pattern to whitelist for the whole project
+          android.whitelist = lib-dynload/collections.so
+          
+          # (str) Android logcat filters to use (default is *)
+          android.logcat_filters = *:S python:D
+          
+          # (bool) Copy library instead of making a libpymodules.so
+          android.accept_sdk_license = True
+          
+          # (list) android.permissions (see _build_permissions function in buildozer.spec for all the supported ones)
+          android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+          
+          # (list) Android features
+          android.features = android.hardware.usb.host
           
           [buildozer]
+          
+          # (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
           log_level = 2
           
-          [app:permissions]
+          # (int) Display warning upon buildozer exit (0 = off, 1 = on (default))
+          warn_on_root = 1
           
-          [app:permissions:android]
-          android.accept_sdk_license = True
-          android.api = 33
-          android.minapi = 24
-          android.ndk = 27.3.13750724
-          android.archs = arm64-v8a,armeabi-v7a
-          p4a.hook = hooks.py
-          EOF
+          # (str) Path to build artifact storage, absolute or relative to spec file
+          build_dir = .buildozer
+          
+          # (str) Path to build output (i.e. .apk, .aab, .ipa) storage
+          bin_dir = ./bin
+          
+          BUILDOZER_SPEC
+          
+          echo "✓ buildozer.spec created"
+          cat buildozer.spec
 
-      - name: Build APK with Buildozer
+      - name: Build Android APK
         run: |
-          cd /root
-          buildozer android debug 2>&1 | tee build.log
-        continue-on-error: false
+          echo "Starting APK build..."
+          buildozer android debug 2>&1 | tee build_output.log
+          BUILD_STATUS=$?
+          echo "Build completed with status: $BUILD_STATUS"
+          if [ $BUILD_STATUS -ne 0 ]; then
+            echo "Build failed!"
+            tail -100 build_output.log
+            exit $BUILD_STATUS
+          fi
 
-      - name: Upload APK artifact
+      - name: List build artifacts
+        if: always()
+        run: |
+          echo "Contents of bin directory:"
+          ls -lah bin/ || echo "bin directory not found"
+          echo "Looking for APK files:"
+          find . -name "*.apk" -type f || echo "No APK files found"
+
+      - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: systemupdate-apk
           path: bin/*.apk
           retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload build logs
         if: always()
@@ -86,6 +193,15 @@ jobs:
         with:
           name: build-logs
           path: |
-            build.log
-            .buildozer/
+            build_output.log
+            buildozer.spec
           retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Print summary
+        if: always()
+        run: |
+          echo "=== Build Summary ==="
+          echo "Job status: ${{ job.status }}"
+          echo "Build artifacts available in 'systemupdate-apk' artifact"
+          echo "Build logs available in 'build-logs' artifact"
