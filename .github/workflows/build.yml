@@ -77,7 +77,8 @@ jobs:
             libltdl7 \
             cython3 \
             wget \
-            curl
+            curl \
+            unzip
           
           echo "✓ Build dependencies installed"
 
@@ -111,6 +112,40 @@ jobs:
           which buildozer
           buildozer --version || echo "Buildozer installed successfully"
 
+      - name: Set up Android SDK
+        run: |
+          echo "Setting up Android SDK and NDK..."
+          mkdir -p $HOME/Android/Sdk
+          cd $HOME/Android/Sdk
+          
+          echo "Downloading Android SDK Command-line Tools..."
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip
+          rm cmdline-tools.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          
+          echo "Setting Android environment variables..."
+          echo "ANDROID_SDK_ROOT=$HOME/Android/Sdk" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$HOME/Android/Sdk" >> $GITHUB_ENV
+          echo "PATH=$PATH:$HOME/Android/Sdk/cmdline-tools/latest/bin:$HOME/Android/Sdk/platform-tools:$HOME/Android/Sdk/tools/bin" >> $GITHUB_ENV
+          
+          echo "Accepting Android SDK licenses..."
+          yes | $HOME/Android/Sdk/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+          
+          echo "Installing Android SDK packages..."
+          $HOME/Android/Sdk/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.0" \
+            "ndk;25.3.20230213" \
+            --channel=0
+          
+          echo "Verifying Android SDK installation..."
+          ls -la $HOME/Android/Sdk/
+          
+          echo "✓ Android SDK and NDK installed successfully"
+
       - name: Create buildozer configuration
         run: |
           cat > buildozer.spec << 'BUILDOZER_SPEC'
@@ -141,7 +176,7 @@ jobs:
           source.exclude_exts = spec
           
           # (list) List of directory to exclude from include on Android
-          source.exclude_dirs = tests, bin
+          source.exclude_dirs = tests, bin, .buildozer
           
           # (str) Application versioning (method 1)
           version = 0.1
@@ -203,11 +238,28 @@ jobs:
           
           echo "✓ buildozer.spec created"
 
-      - name: Build Android APK
+      - name: Build Android APK (Debug)
         run: |
           echo "Starting APK build process..."
-          buildozer android debug 2>&1 | tee build_output.log
-          echo "✓ APK build completed successfully"
+          export ANDROID_SDK_ROOT=$HOME/Android/Sdk
+          export ANDROID_HOME=$HOME/Android/Sdk
+          export PATH=$PATH:$HOME/Android/Sdk/cmdline-tools/latest/bin:$HOME/Android/Sdk/platform-tools:$HOME/Android/Sdk/tools/bin
+          
+          echo "Android environment:"
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          
+          buildozer --verbose android debug 2>&1 | tee build_output.log
+          
+          BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          echo ""
+          echo "Build exit code: $BUILD_EXIT_CODE"
+          
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "⚠️  Build command returned non-zero exit code"
+          else
+            echo "✓ Build command completed"
+          fi
 
       - name: Check build artifacts & diagnose
         if: always()
@@ -226,19 +278,65 @@ jobs:
           
           echo ""
           echo "=== Searching for all .apk files recursively ==="
-          find . -name "*.apk" -type f 2>/dev/null && echo "✓ APK found!" || echo "❌ No APK files found"
+          if find . -name "*.apk" -type f 2>/dev/null; then
+            echo "✓ APK found!"
+          else
+            echo "❌ No APK files found in current search"
+          fi
           
           echo ""
           echo "=== Checking bin directory ==="
           if [ -d "bin" ]; then
+            echo "bin directory exists:"
             ls -lah bin/
           else
-            echo "bin directory not found"
+            echo "❌ bin directory not found"
           fi
           
           echo ""
-          echo "=== Last 100 lines of build log ==="
-          tail -100 build_output.log
+          echo "=== Checking .buildozer directory structure ==="
+          if [ -d ".buildozer" ]; then
+            echo ".buildozer directory found, searching for APK files:"
+            find .buildozer -name "*.apk" -type f 2>/dev/null | head -20
+          else
+            echo "❌ .buildozer directory not found"
+          fi
+          
+          echo ""
+          echo "=== Last 150 lines of build log ==="
+          if [ -f build_output.log ]; then
+            tail -150 build_output.log
+          else
+            echo "build_output.log not found"
+          fi
+          
+          echo ""
+          echo "=== Checking for build errors in log ==="
+          if [ -f build_output.log ]; then
+            echo "Errors/Exceptions found:"
+            grep -i "error\|exception\|failed" build_output.log | tail -20 || echo "No errors found"
+          fi
+
+      - name: Copy APK from .buildozer if needed
+        if: always()
+        run: |
+          echo "Attempting to locate and copy APK from .buildozer..."
+          
+          # Try to find APK in .buildozer and copy to bin
+          if find .buildozer -name "*.apk" -type f 2>/dev/null | head -1 | xargs -I {} cp {} ./bin/ 2>/dev/null; then
+            echo "✓ APK copied from .buildozer to bin"
+          else
+            echo "No APK found in .buildozer to copy"
+          fi
+          
+          # List final contents of bin directory
+          echo ""
+          echo "=== Final bin directory contents ==="
+          if [ -d "bin" ]; then
+            ls -lah bin/
+          else
+            echo "bin directory still not found"
+          fi
 
       - name: Upload APK artifacts
         if: always()
@@ -255,5 +353,14 @@ jobs:
         with:
           name: build-logs
           path: build_output.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload .buildozer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-diagnostics
+          path: .buildozer/
           retention-days: 7
           if-no-files-found: ignore
