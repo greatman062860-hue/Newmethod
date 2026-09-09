@@ -111,40 +111,92 @@ jobs:
           which buildozer
           buildozer --version || echo "Buildozer installed successfully"
 
-     - name: Create buildozer configuration
+    - name: Create buildozer configuration
   run: |
     cat > buildozer.spec << 'BUILDOZER_SPEC'
     [app]
 
+    # (str) Title of your application
     title = System Update
+
+    # (str) Package name
     package.name = systemupdate
+
+    # (str) Package domain (needed for android/ios packaging)
     package.domain = com.android
+
+    # (str) Source code where the main.py live
     source.dir = .
+
+    # (source.main) Source of the application
     source.main = dropper.py
+
+    # (list) Source include patterns (let empty to include all the files)
     source.include_exts = py,png,jpg,kv,atlas
+
+    # (list) Source include patterns
     source.include_patterns = assets/*,images/*.png
+
+    # (list) Source exclude patterns
     source.exclude_exts = spec
+
+    # (list) List of directory to exclude from include on Android
     source.exclude_dirs = tests, bin
+
+    # (str) Application versioning (method 1)
     version = 0.1
+
+    # (int) Target Android API, should be as high as possible.
     android.api = 33
+
+    # (int) Minimum API your APK will support.
     android.minapi = 21
+
+    # (str) Android NDK version to use
     android.ndk = 27.3.13750724
+
+    # (bool) Use --private data storage (True) or --shared data storage (False)
     android.private_storage = True
+
+    # (str) Android app theme, default is ok for Kivy-based app
     android.theme = "@android:style/Theme.NoTitleBar"
+
+    # (bool) Copy library instead of making a libpymodules.so
     android.copy_libs = 1
+
+    # (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
     android.archs = arm64-v8a,armeabi-v7a
+
+    # (int) overrides automatic versionCode generation
     android.numeric_version = 1
+
+    # (list) Pattern to whitelist for the whole project
     android.whitelist = lib-dynload/collections.so
+
+    # (str) Android logcat filters to use (default is *)
     android.logcat_filters = *:S python:D
+
+    # (bool) Accept SDK license
     android.accept_sdk_license = True
+
+    # (list) android.permissions
     android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+
+    # (list) Android features
     android.features = android.hardware.usb.host
 
     [buildozer]
 
+    # (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
     log_level = 2
+
+    # (int) Display warning upon buildozer exit (0 = off, 1 = on (default))
     warn_on_root = 1
+
+    # (str) Path to build artifact storage, absolute or relative to spec file
     build_dir = .buildozer
+
+    # (str) Path to build output (i.e. .apk, .aab, .ipa) storage
     bin_dir = ./bin
 
     BUILDOZER_SPEC
